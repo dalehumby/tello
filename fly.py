@@ -24,7 +24,7 @@ import av
 import cv2.cv2 as cv2  # for avoidance of pylint error
 import numpy
 import time
-from tracker import Tracker
+from aruco import Tracker
 from simple_pid import PID
 
 SPEED = 20
@@ -117,9 +117,7 @@ def fly_with_keyboard(drone, key):
 
 def main():
     drone = tellopy.Tello()
-    blue_lower = (110, 50, 50)
-    blue_upper = (130, 255, 255)
-    tracker = Tracker(CAMERA_HEIGHT, CAMERA_WIDTH, blue_lower, blue_upper)
+    tracker = Tracker(CAMERA_WIDTH/2, CAMERA_HEIGHT/2, id=0)
     control_y = PID(-0.08, -0.007, -0.003, setpoint=0)
     control_z = PID(-0.15, -0.01, -0.005, setpoint=0)
     control_y.sample_time = 1/60
@@ -173,8 +171,8 @@ def main():
                         control_y.auto_mode = False
                         control_z.auto_mode = False
 
-                error_y, error_z = tracker.track(image)
-                image = tracker.draw_arrows(image)
+                error_y, error_z, image = tracker.track(image)
+
                 v_y = control_y(error_y)
                 v_z = control_z(error_z)
                 print('error y', error_y, 'v_y', v_y, 'PID', control_y.components)
