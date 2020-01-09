@@ -30,7 +30,9 @@ from simple_pid import PID
 SPEED = 20
 MAX_SPEED = 40
 CAMERA_HEIGHT, CAMERA_WIDTH = 720, 960
-CAMERA_FOV = 86
+CAMERA_VFOV = 43
+CAMERA_HFOV = 60
+CAMERA_HORIZON = 185
 
 flight_data = None
 log_data = None
@@ -51,10 +53,11 @@ def draw_text(image, text, row):
 def draw_hud(image, autopilot_on):
     """Draw heads up display (HUD) on the image."""
     # Draw horizontal and vertical line in middle of frame
-    color = (191, 201, 202)
-    x, y = int(CAMERA_WIDTH/2), int(CAMERA_HEIGHT/2)
-    cv2.line(image, (0, y), (CAMERA_WIDTH, y), color, 1, cv2.LINE_AA)
-    cv2.line(image, (x, 0), (x, CAMERA_HEIGHT), color, 1, cv2.LINE_AA)
+    #color = (191, 201, 202)
+    #x, y = int(CAMERA_WIDTH/2), int(CAMERA_HEIGHT/2)
+    #cv2.line(image, (0, y), (CAMERA_WIDTH, y), color, 1, cv2.LINE_AA)
+    #cv2.line(image, (x, 0), (x, CAMERA_HEIGHT), color, 1, cv2.LINE_AA)
+    image = draw_horizon(image)
 
     # Flight dynamics
     if flight_data:
@@ -67,6 +70,38 @@ def draw_hud(image, autopilot_on):
     draw_text(image, 'Autopilot: ' + str(autopilot_on), 1)
 
     return image
+
+
+def draw_horizon(image):
+    """Draw artificial horizon on the heads up display.
+    Looks something like ---- o ----
+    TODO make the horizon pitch and roll as drone moves."""
+    color = (191, 201, 202)
+    cntr_x, cntr_y = int(CAMERA_WIDTH/2), CAMERA_HORIZON
+    length = 100
+    cv2.circle(image, (cntr_x, cntr_y), 5, color, 1, cv2.LINE_AA)
+    cv2.line(image, (cntr_x-10, cntr_y), (cntr_x-10-length, cntr_y), color, 1, cv2.LINE_AA)
+    cv2.line(image, (cntr_x+10, cntr_y), (cntr_x+10+length, cntr_y), color, 1, cv2.LINE_AA)
+    return image
+
+
+def draw_reticle(image, reticle):
+    """Draw the reticle on the image."""
+    color = (191, 201, 202)
+    length = 25
+    x, y = reticle
+    cv2.line(image, (x-length, y), (x+length, y), color, 1, cv2.LINE_AA)
+    cv2.line(image, (x, y-length), (x, y+length), color, 1, cv2.LINE_AA)
+    return image
+
+
+def calc_gluideslope(angle):
+    """Calculate the (x,y) position of the reticle given a glide slope in degrees.
+    Negative means down."""
+    pixels_per_degree = CAMERA_HEIGHT / CAMERA_VFOV
+    x = round(CAMERA_WIDTH / 2)
+    y = round(CAMERA_HORIZON - angle * pixels_per_degree)
+    return (x, y)
 
 
 def flight_data_handler(event, sender, data, **args):
@@ -117,13 +152,14 @@ def fly_with_keyboard(drone, key):
 
 def main():
     drone = tellopy.Tello()
-    tracker = Tracker(CAMERA_WIDTH/2, CAMERA_HEIGHT/2, id=0)
+    tracker = Tracker()
     control_y = PID(-0.08, -0.007, -0.003, setpoint=0)
     control_z = PID(-0.15, -0.01, -0.005, setpoint=0)
     control_y.sample_time = 1/60
     control_z.sample_time = 1/60
     control_y.output_limits = (-MAX_SPEED, MAX_SPEED)
     control_z.output_limits = (-MAX_SPEED, MAX_SPEED)
+    reticle = calc_gluideslope(-5)
 
     try:
         drone.subscribe(drone.EVENT_FLIGHT_DATA, flight_data_handler)
@@ -171,12 +207,18 @@ def main():
                         control_y.auto_mode = False
                         control_z.auto_mode = False
 
-                error_y, error_z, image = tracker.track(image)
+                tracker.update(image)
+                image = tracker.draw_markers(image)
+                image = draw_reticle(image, reticle)
+                error_y, error_z = tracker.calc_error(0, reticle)
+
+                print(tracker.markers)
+                print(tracker.distances)
 
                 v_y = control_y(error_y)
                 v_z = control_z(error_z)
-                print('error y', error_y, 'v_y', v_y, 'PID', control_y.components)
-                print('error z', error_z, 'v_z', v_z, 'PID', control_z.components)
+                #print('error y', error_y, 'v_y', v_y, 'PID', control_y.components)
+                #print('error z', error_z, 'v_z', v_z, 'PID', control_z.components)
 
                 # For tuning the PID controller gains
                 if key == ord('u'):
@@ -191,7 +233,7 @@ def main():
                     control_y.Kd = control_y.Kd * 1.1
                 elif key == ord(';'):
                     control_y.Kd = control_y.Kd * 0.9
-                print('control_y tunings', control_y.tunings)
+                #print('control_y tunings', control_y.tunings)
 
                 if autopilot_on:
                     if v_z > 0:
