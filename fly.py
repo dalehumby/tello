@@ -22,7 +22,7 @@ import traceback
 import tellopy
 import av
 import cv2.cv2 as cv2  # for avoidance of pylint error
-import numpy
+import numpy as np
 import time
 from aruco import Tracker
 from simple_pid import PID
@@ -123,7 +123,7 @@ def fly_with_keyboard(drone, key):
     elif key == ord('s'):
         drone.backward(SPEED)
     elif key == ord('w'):
-        drone.forward(SPEED)
+        drone.forward(SPEED/2)
     elif key == ord('a'):
         drone.left(SPEED)
     elif key == ord('d'):
@@ -150,15 +150,47 @@ def fly_with_keyboard(drone, key):
         print('Unknown key pressed:', key)
 
 
+def quat2euler(w, x, y, z):
+    """
+    This is a modified version of this:
+    https://en.wikipedia.org/wiki/Conversion_between_quaternions_and_Euler_angles
+    """
+    from math import atan2, pi, asin
+    ysqr = y * y
+
+    t0 = +2.0 * (w * x + y * z)
+    t1 = +1.0 - 2.0 * (x * x + ysqr)
+    X = atan2(t0, t1)
+
+    t2 = +2.0 * (w * y - z * x)
+    t2 = +1.0 if t2 > +1.0 else t2
+    t2 = -1.0 if t2 < -1.0 else t2
+    Y = asin(t2)
+
+    t3 = +2.0 * (w * z + x * y)
+    t4 = +1.0 - 2.0 * (ysqr + z * z)
+    Z = atan2(t3, t4)
+
+    X *= 180/pi
+    Y *= 180/pi
+    Z *= 180/pi
+
+    return (X, Y, Z,)
+
+
+
 def main():
     drone = tellopy.Tello()
     tracker = Tracker()
     control_y = PID(-0.08, -0.007, -0.003, setpoint=0)
     control_z = PID(-0.15, -0.01, -0.005, setpoint=0)
+    control_yaw = PID(-0.08, -0.007, -0.003, setpoint=0)
     control_y.sample_time = 1/60
     control_z.sample_time = 1/60
+    control_yaw.sample_time = 1/60
     control_y.output_limits = (-MAX_SPEED, MAX_SPEED)
     control_z.output_limits = (-MAX_SPEED, MAX_SPEED)
+    control_yaw.output_limits = (-MAX_SPEED, MAX_SPEED)
     reticle = calc_gluideslope(-5)
 
     try:
@@ -182,6 +214,7 @@ def main():
         autopilot_on = False
         control_y.auto_mode = False
         control_z.auto_mode = False
+        control_yaw.auto_mode = False
 
         frame_skip = 300  # Skip first frames
         while True:
@@ -191,7 +224,7 @@ def main():
                     frame_skip -= 1
                     continue
                 start_time = time.time()
-                image = cv2.cvtColor(numpy.array(frame.to_image()), cv2.COLOR_RGB2BGR)
+                image = cv2.cvtColor(np.array(frame.to_image()), cv2.COLOR_RGB2BGR)
 
                 # Key presses give the drone a speed, and not a distance to move. Press x to stop all movement
                 key = cv2.waitKey(1) & 0xFF
@@ -201,49 +234,64 @@ def main():
                 if key == ord('p'):
                     autopilot_on = not autopilot_on
                     if autopilot_on:
-                        control_y.auto_mode = True
+                        #control_y.auto_mode = True
                         control_z.auto_mode = True
+                        control_yaw.auto_mode = True
                     else:
-                        control_y.auto_mode = False
+                        #control_y.auto_mode = False
                         control_z.auto_mode = False
+                        control_yaw.auto_mode = False
 
                 tracker.update(image)
                 image = tracker.draw_markers(image)
                 image = draw_reticle(image, reticle)
-                error_y, error_z = tracker.calc_error(0, reticle)
+                error_yaw, error_z, error_y = tracker.calc_error(2, reticle)
 
-                print(tracker.markers)
-                print(tracker.distances)
+                #print('Errors:', error_yaw, error_z, error_y)
 
                 v_y = control_y(error_y)
                 v_z = control_z(error_z)
+                v_yaw = control_yaw(error_yaw)
                 #print('error y', error_y, 'v_y', v_y, 'PID', control_y.components)
                 #print('error z', error_z, 'v_z', v_z, 'PID', control_z.components)
+                #print('error yaw', error_y, 'v_yaw', v_yaw, 'PID', control_yaw.components)
 
-                # For tuning the PID controller gains
-                if key == ord('u'):
-                    control_y.Kp = control_y.Kp * 1.1
-                elif key == ord('j'):
-                    control_y.Kp = control_y.Kp * 0.9
-                if key == ord('i'):
-                    control_y.Ki = control_y.Ki * 1.1
-                elif key == ord('k'):
-                    control_y.Ki = control_y.Ki * 0.9
-                if key == ord('o'):
-                    control_y.Kd = control_y.Kd * 1.1
-                elif key == ord(';'):
-                    control_y.Kd = control_y.Kd * 0.9
-                #print('control_y tunings', control_y.tunings)
+                #print(log_data.imu)
+                #print(type(log_data.imu))
+                imu = log_data.imu
+                #print(quat2euler(imu.q0, imu.q1, imu.q2, imu.q3))  # roll, pitch, yaw
+
+                tracker.draw_axes(image)
+
+                try:
+                    if tracker.distances[0] < 1000:
+                        control_y.auto_mode = True
+                    else:
+                        control_y.auto_mode = False
+                except KeyError:
+                    pass
 
                 if autopilot_on:
-                    if v_z > 0:
+                    if v_z is None:
+                        pass
+                    elif v_z > 0:
                         drone.up(v_z)
                     else:
                         drone.down(abs(v_z))
-                    if v_y > 0:
+
+                    if v_y is None:
+                        pass
+                    elif v_y > 0:
                         drone.right(v_y)
                     else:
                         drone.left(abs(v_y))
+
+                    if v_yaw is None:
+                        pass
+                    elif v_yaw > 0:
+                        drone.clockwise(v_yaw)
+                    else:
+                        drone.counter_clockwise(abs(v_yaw))
 
 
                 # Display an image with edge detection. Make smaller so can fit on screen with the HUD

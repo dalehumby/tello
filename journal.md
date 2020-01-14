@@ -1,5 +1,13 @@
 # Journal
 
+## Tue, 14 Jan
+### Calibrated camera for pose estimation
+Wrote `calibration.py` to calibrate the Tello camera so that I could use it for pose estimation - rotation and translation estimates - instead of my (hacky) solutions. Especially for knowing how far away from the target, and how far to yaw to square up the drone to the target.
+
+Todo:
+- fix the axes of the drone and target so that the current drone position + error = target.
+- Using Right Handed coordinate system, Z+ is up, Y+ is left and X+ is forward. The closest I can find for an authorative source is Tello [mission pad pdf](https://dl-cdn.ryzerobotics.com/downloads/Tello/Tello%20Mission%20Pad%20User%20Guide.pdf). The IMU data from velocity, acceleration and MVO (down camera) seem to use different co-ordinate systems. Although I quite likely haven't understood it correctly. The TelloPy and Go code are not any help.
+
 ## Thur, 9 Jan
 ### Added distance measuring
 Looks like horizontal field of view is 60 degrees, and vertical field of view is 43 degrees. Added distance measuring as part of `aruco.py`, so distances to all markers are calculated each time the positions are updated. At far distances (2-4 m) a 1 pixel change leads to 50-100 mm distance change, and so the distances jump around a lot. 
@@ -17,9 +25,8 @@ Getting ready for the drone to fly towards a target on a gluide path, like -5 de
 
 I did fly the drone towards the target, but as it got closer the tracking became progressivley more unstable. As the drone gets closer the size of the marker increases in the video frame and a relativley small real world distance leads to a large pixel displacement, and since the control algorithm is based on pixels not millimeters the drone goes a bit crazy.
 
-Now that I have distance to target, I can calculate vertical and horizontal errors in millimeters and feed that to the control algorithm.
-
-[ ] I still need to find out what units TelloPy uses. I have a hunch it is centimeters... I'll match those units.
+- [ ] Now that I have distance to target, I can calculate vertical and horizontal errors in millimeters and feed that to the control algorithm.
+- [ ] I still need to find out what units TelloPy uses. I have a hunch it is centimeters... I'll match those units.
 
 ## Tue, 7 Jan
 Was very pleased with Sunday afternoons work. Drone aligned with a blue marker, first got it working in vertical (z axis), and then horizontally (y axis), spent most of the time writing my own PID implementation, but all the corner cases got me, so used [Simple PID](https://pypi.org/project/simple-pid/) instead. Lots of parameter tuning.
